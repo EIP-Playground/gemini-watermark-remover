@@ -120,3 +120,41 @@ test('removeRepeatedWatermarkLayers should support continuing pass numbering fro
     assert.equal(result.passes[0].index, 2);
     assert.equal(result.passCount, result.passes[result.passes.length - 1].index);
 });
+
+test('removeRepeatedWatermarkLayers should stop when a pass causes texture collapse against the local reference', async () => {
+    const removeRepeatedWatermarkLayers = await getRemoveRepeatedWatermarkLayers();
+    const width = 96;
+    const height = 96;
+    const data = new Uint8ClampedArray(width * height * 4);
+
+    for (let i = 0; i < data.length; i += 4) {
+        data[i + 3] = 255;
+    }
+
+    const position = { x: 24, y: 48, width: 48, height: 48 };
+    for (let row = 0; row < 48; row++) {
+        for (let col = 0; col < 48; col++) {
+            const referenceIdx = (row * width + (24 + col)) * 4;
+            const candidateIdx = (((48 + row) * width) + (24 + col)) * 4;
+            const referenceValue = (row + col) % 2 === 0 ? 40 : 180;
+            data[referenceIdx] = referenceValue;
+            data[referenceIdx + 1] = referenceValue;
+            data[referenceIdx + 2] = referenceValue;
+            data[candidateIdx] = 138;
+            data[candidateIdx + 1] = 138;
+            data[candidateIdx + 2] = 138;
+        }
+    }
+
+    const result = removeRepeatedWatermarkLayers({
+        imageData: { width, height, data },
+        alphaMap: new Float32Array(48 * 48).fill(0.5),
+        position,
+        maxPasses: 2
+    });
+
+    assert.equal(result.stopReason, 'safety-texture-collapse');
+    assert.equal(result.passCount, 0);
+    assert.equal(result.attemptedPassCount, 1);
+    assert.equal(result.passes.length, 0);
+});

@@ -56,6 +56,15 @@ export interface WatermarkDetectionMeta {
     suppressionGain: number | null;
 }
 
+export interface WatermarkSelectionDebug {
+    candidateSource: string | null;
+    texturePenalty: number | null;
+    tooDark: boolean;
+    tooFlat: boolean;
+    hardReject: boolean;
+    usedSizeJitter: boolean;
+}
+
 export interface WatermarkMeta {
     applied: boolean;
     skipReason: string | null;
@@ -69,6 +78,7 @@ export interface WatermarkMeta {
     passCount: number;
     attemptedPassCount: number;
     passStopReason: string | null;
+    selectionDebug?: WatermarkSelectionDebug | null;
 }
 
 export interface RemoveOptions {

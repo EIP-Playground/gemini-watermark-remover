@@ -48,6 +48,7 @@
     "debug:manual:clean": "cmd /c \"set GWR_DEBUG_BROWSER=native-chrome&& node scripts/debug-extension.js --clean\"",
     "debug:chrome": "pnpm debug:auto",
     "debug:chrome:clean": "pnpm debug:auto:clean",
+    "benchmark:samples": "node scripts/sample-benchmark.js",
     "serve": "pnpm dlx serve dist",
     "export:samples": "node scripts/export-fixed-samples.js"
   },

@@ -10,6 +10,7 @@ import {
     scoreRegion,
     selectInitialCandidate
 } from './candidateSelector.js';
+import { createSelectionDebugSummary } from './selectionDebug.js';
 import {
     calculateWatermarkPosition,
     detectWatermarkConfig,
@@ -83,7 +84,8 @@ function createWatermarkMeta({
     decisionTier = null,
     applied = true,
     skipReason = null,
-    subpixelShift = null
+    subpixelShift = null,
+    selectionDebug = null
 } = {}) {
     const normalizedPosition = normalizeMetaPosition(position);
 
@@ -111,7 +113,8 @@ function createWatermarkMeta({
         // source remains as a verbose execution trace for debugging/tests.
         source,
         decisionTier,
-        subpixelShift: subpixelShift ?? null
+        subpixelShift: subpixelShift ?? null,
+        selectionDebug
     };
 }
 
@@ -337,7 +340,8 @@ export function processWatermarkImageData(imageData, options = {}) {
                 source: 'skipped',
                 decisionTier: initialSelection.decisionTier ?? 'insufficient',
                 applied: false,
-                skipReason: 'no-watermark-detected'
+                skipReason: 'no-watermark-detected',
+                selectionDebug: null
             })
         };
     }
@@ -494,7 +498,11 @@ export function processWatermarkImageData(imageData, options = {}) {
             source,
             decisionTier,
             applied: true,
-            subpixelShift
+            subpixelShift,
+            selectionDebug: createSelectionDebugSummary({
+                selectedTrial,
+                selectionSource: initialSelection.source
+            })
         })
     };
 }

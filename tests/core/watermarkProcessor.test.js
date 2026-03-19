@@ -181,6 +181,82 @@ test('processWatermarkImageData should recover near-official scaled anchor witho
     );
 });
 
+test('processWatermarkImageData should recover small default-anchor size drift without adaptive search', () => {
+    const alpha96 = createSyntheticAlphaMap(96);
+    const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
+    const alpha54 = interpolateAlphaMap(alpha96, 96, 54);
+    const imageData = createPatternImageData(320, 320);
+    const truePosition = {
+        x: 320 - 32 - 54,
+        y: 320 - 32 - 54,
+        width: 54,
+        height: 54
+    };
+    applySyntheticWatermark(imageData, alpha54, truePosition, 1);
+
+    const result = processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        adaptiveMode: 'never',
+        maxPasses: 1,
+        getAlphaMap: (size) => interpolateAlphaMap(alpha96, 96, size)
+    });
+
+    const residual = computeRegionSpatialCorrelation({
+        imageData: result.imageData,
+        alphaMap: alpha54,
+        region: { x: truePosition.x, y: truePosition.y, size: truePosition.width }
+    });
+
+    assert.ok(result.meta.applied, `skipReason=${result.meta.skipReason}`);
+    assert.ok(
+        Math.abs(result.meta.position.x - truePosition.x) <= 4,
+        `x=${result.meta.position.x}`
+    );
+    assert.ok(
+        Math.abs(result.meta.position.y - truePosition.y) <= 4,
+        `y=${result.meta.position.y}`
+    );
+    assert.ok(
+        Math.abs(result.meta.position.width - truePosition.width) <= 2,
+        `width=${result.meta.position.width}`
+    );
+    assert.ok(
+        residual < 0.22,
+        `expected true-region residual < 0.22, got ${residual}, source=${result.meta.source}`
+    );
+});
+
+test('processWatermarkImageData should expose candidate selection debug summary in meta', () => {
+    const alpha96 = createSyntheticAlphaMap(96);
+    const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
+    const alpha54 = interpolateAlphaMap(alpha96, 96, 54);
+    const imageData = createPatternImageData(320, 320);
+    const truePosition = {
+        x: 320 - 32 - 54,
+        y: 320 - 32 - 54,
+        width: 54,
+        height: 54
+    };
+    applySyntheticWatermark(imageData, alpha54, truePosition, 1);
+
+    const result = processWatermarkImageData(imageData, {
+        alpha48,
+        alpha96,
+        adaptiveMode: 'never',
+        maxPasses: 1,
+        getAlphaMap: (size) => interpolateAlphaMap(alpha96, 96, size)
+    });
+
+    assert.ok(result.meta.applied, `skipReason=${result.meta.skipReason}`);
+    assert.ok(result.meta.selectionDebug, 'expected selectionDebug to be present');
+    assert.equal(result.meta.selectionDebug.usedSizeJitter, true);
+    assert.equal(typeof result.meta.selectionDebug.texturePenalty, 'number');
+    assert.equal(typeof result.meta.selectionDebug.tooDark, 'boolean');
+    assert.equal(typeof result.meta.selectionDebug.tooFlat, 'boolean');
+    assert.equal(typeof result.meta.selectionDebug.hardReject, 'boolean');
+});
+
 test('processWatermarkImageData should expose normalized decision tier alongside legacy source tags', () => {
     const alpha96 = createSyntheticAlphaMap(96);
     const alpha48 = interpolateAlphaMap(alpha96, 96, 48);
