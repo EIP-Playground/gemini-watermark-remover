@@ -127,6 +127,7 @@ test('createGeminiDownloadFetchHook should fall back to original response when p
     originalFetch,
     isTargetUrl: () => true,
     normalizeUrl: (url) => url,
+    logger: { warn() {} },
     processBlob: async () => {
       throw new Error('boom');
     }
