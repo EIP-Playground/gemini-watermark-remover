@@ -618,6 +618,43 @@ test('processPreviewPageImageSource should return confirmed preview candidate re
   assert.equal(result.selectedStrategy, 'page-fetch');
 });
 
+test('processPreviewPageImageSource should pass preview-fast processing options to watermark removal', async () => {
+  const originalBlob = new Blob(['page-fetch'], { type: 'image/webp' });
+  let receivedOptions = null;
+
+  await processPreviewPageImageSource({
+    sourceUrl: 'https://lh3.googleusercontent.com/gg/example-token=s1024-rj',
+    imageElement: { id: 'fixture-image' },
+    fetchPreviewBlob: async () => originalBlob,
+    captureRenderedImageBlob: async () => {
+      throw new Error('rendered capture should not run');
+    },
+    processWatermarkBlobImpl: async (_blob, options) => {
+      receivedOptions = options;
+      return {
+        processedBlob: new Blob(['processed'], { type: 'image/png' }),
+        processedMeta: {
+          applied: true,
+          size: 34,
+          position: { x: 966, y: 501, width: 34, height: 34 },
+          source: 'standard+preview-anchor+validated',
+          detection: {
+            originalSpatialScore: 0.31,
+            processedSpatialScore: 0.08,
+            suppressionGain: 0.34
+          }
+        }
+      };
+    }
+  });
+
+  assert.deepEqual(receivedOptions, {
+    adaptiveMode: 'never',
+    maxPasses: 1,
+    processingProfile: 'preview-fast'
+  });
+});
+
 test('processOriginalPageImageSource should acquire original blob and remove watermark', async () => {
   const originalBlob = new Blob(['original'], { type: 'image/jpeg' });
   const processedBlob = new Blob(['processed'], { type: 'image/png' });
@@ -705,6 +742,143 @@ test('collectCandidateImages should collect processable descendant images only o
 
     assert.deepEqual(candidates, [imageA, imageB]);
   });
+});
+
+test('collectCandidateImages should include opaque blob images when they look like Gemini generated images', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const actionCluster = {
+      querySelectorAll: () => [{}, {}, {}],
+      parentElement: null
+    };
+    const image = new MockHTMLImageElement();
+    image.dataset = {};
+    image.naturalWidth = 1024;
+    image.naturalHeight = 768;
+    image.clientWidth = 480;
+    image.clientHeight = 360;
+    image.currentSrc = 'blob:https://gemini.google.com/runtime-preview';
+    image.src = image.currentSrc;
+    image.parentElement = actionCluster;
+    image.closest = () => null;
+
+    const root = {
+      querySelectorAll() {
+        return [image];
+      }
+    };
+
+    const candidates = collectCandidateImages(root);
+
+    assert.deepEqual(candidates, [image]);
+  });
+});
+
+test('collectCandidateImages should include fullscreen cached blob images inside Gemini containers', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const container = {};
+    const image = new MockHTMLImageElement();
+    image.dataset = {};
+    image.naturalWidth = 2048;
+    image.naturalHeight = 1118;
+    image.clientWidth = 951;
+    image.clientHeight = 519;
+    image.currentSrc = 'blob:https://gemini.google.com/fullscreen-cached';
+    image.src = image.currentSrc;
+    image.closest = (selector) => selector === 'generated-image,.generated-image-container'
+      ? container
+      : null;
+
+    const root = {
+      querySelectorAll() {
+        return [image];
+      }
+    };
+
+    const candidates = collectCandidateImages(root);
+
+    assert.deepEqual(candidates, [image]);
+  });
+});
+
+test('collectCandidateImages should include zero-sized fullscreen blob images inside Gemini containers before load completes', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const container = {};
+    const image = new MockHTMLImageElement();
+    image.dataset = {};
+    image.naturalWidth = 0;
+    image.naturalHeight = 0;
+    image.clientWidth = 0;
+    image.clientHeight = 0;
+    image.complete = false;
+    image.currentSrc = '';
+    image.src = 'blob:https://gemini.google.com/fullscreen-pending';
+    image.closest = (selector) => selector === 'generated-image,.generated-image-container'
+      ? container
+      : null;
+
+    const root = {
+      querySelectorAll() {
+        return [image];
+      }
+    };
+
+    const candidates = collectCandidateImages(root);
+
+    assert.deepEqual(candidates, [image]);
+  });
+});
+
+test('processPageImageSource should treat blob page images as preview-fast rendered captures', async () => {
+  const sourceUrl = 'blob:https://gemini.google.com/runtime-preview';
+  const imageElement = { id: 'fixture-image' };
+  const renderedBlob = new Blob(['rendered'], { type: 'image/png' });
+  const processedBlob = new Blob(['processed'], { type: 'image/png' });
+  const calls = [];
+
+  const result = await processPageImageSource({
+    sourceUrl,
+    imageElement,
+    fetchPreviewBlob: async () => {
+      calls.push('preview-fetch');
+      throw new Error('preview fetch should not run');
+    },
+    fetchBlobDirectImpl: async () => {
+      calls.push('blob-fetch');
+      throw new Error('blob fetch should not run');
+    },
+    captureRenderedImageBlob: async (image) => {
+      calls.push(['capture', image]);
+      return renderedBlob;
+    },
+    processWatermarkBlobImpl: async (blob, options) => {
+      calls.push(['process', blob, options]);
+      return {
+        processedBlob,
+        processedMeta: {
+          applied: true,
+          size: 35,
+          position: { x: 0, y: 0, width: 35, height: 35 },
+          source: 'standard+preview-anchor+validated'
+        }
+      };
+    },
+    removeWatermarkFromBlobImpl: async () => {
+      calls.push('remove');
+      throw new Error('full-strength remove should not run for blob previews');
+    }
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.processedBlob, processedBlob);
+  assert.equal(result.selectedStrategy, 'rendered-capture');
+  assert.deepEqual(calls, [
+    ['capture', imageElement],
+    ['process', renderedBlob, {
+      adaptiveMode: 'never',
+      maxPasses: 1,
+      processingProfile: 'preview-fast'
+    }]
+  ]);
 });
 
 test('preparePageImageProcessing should skip ready image with unchanged source', async () => {
@@ -1178,6 +1352,191 @@ test('createPageImageReplacementController should apply skipped helper result wi
       ['page-image-process-start', 'page-image-process-strategy', 'page-image-process-skipped']
     );
     assert.equal(logs[2][1].reason, 'preview-fetch-unavailable');
+  });
+});
+
+test('createPageImageReplacementController should process at most one image per scheduled idle drain', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const scheduledDrains = [];
+    const started = [];
+    const resolvers = [];
+
+    const makeImage = (id) => {
+      const container = createMockElement('div');
+      const image = new MockHTMLImageElement();
+      image.dataset = {
+        gwrSourceUrl: `https://lh3.googleusercontent.com/gg/${id}=s1024-rj`,
+        testId: id
+      };
+      image.style = {};
+      image.src = image.dataset.gwrSourceUrl;
+      image.currentSrc = image.src;
+      image.parentElement = container;
+      image.closest = (selector) => selector === 'generated-image,.generated-image-container'
+        ? container
+        : null;
+      return image;
+    };
+
+    const imageA = makeImage('a');
+    const imageB = makeImage('b');
+
+    const controller = createPageImageReplacementController({
+      logger: createSilentLogger(),
+      scheduleProcessingDrain(callback) {
+        scheduledDrains.push(callback);
+      },
+      processPageImageSourceImpl: async ({ imageElement }) => {
+        started.push(imageElement.dataset.testId);
+        return await new Promise((resolve) => {
+          resolvers.push(() => resolve({
+            skipped: true,
+            reason: 'preview-fetch-unavailable',
+            candidateDiagnostics: [{ strategy: 'page-fetch', status: 'error' }],
+            candidateDiagnosticsSummary: 'page-fetch,error'
+          }));
+        });
+      }
+    });
+
+    controller.processRoot({
+      querySelectorAll() {
+        return [imageA, imageB];
+      }
+    });
+
+    assert.equal(started.length, 0);
+    assert.equal(scheduledDrains.length, 1);
+
+    scheduledDrains[0]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, ['a']);
+
+    resolvers[0]();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(started, ['a']);
+    assert.equal(scheduledDrains.length, 2);
+
+    scheduledDrains[1]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, ['a', 'b']);
+  });
+});
+
+test('createPageImageReplacementController should defer incomplete preview images without blocking later ready images', async () => {
+  await withPageImageTestEnv(async ({ MockHTMLImageElement }) => {
+    const scheduledDrains = [];
+    const timers = [];
+    const started = [];
+
+    const makeImage = (id, {
+      complete = true,
+      naturalWidth = 1024,
+      naturalHeight = 559,
+      clientWidth = 456,
+      clientHeight = 249,
+      sourceUrl = `blob:https://gemini.google.com/${id}`
+    } = {}) => {
+      const actionCluster = {
+        querySelectorAll: () => [{}, {}, {}],
+        parentElement: null
+      };
+      const listeners = new Map();
+      const image = new MockHTMLImageElement();
+      image.dataset = {
+        gwrSourceUrl: sourceUrl,
+        testId: id
+      };
+      image.style = {};
+      image.src = sourceUrl;
+      image.currentSrc = image.src;
+      image.complete = complete;
+      image.naturalWidth = naturalWidth;
+      image.naturalHeight = naturalHeight;
+      image.clientWidth = clientWidth;
+      image.clientHeight = clientHeight;
+      image.parentElement = actionCluster;
+      image.closest = () => null;
+      image.addEventListener = (type, listener) => {
+        listeners.set(type, listener);
+      };
+      image.removeEventListener = (type) => {
+        listeners.delete(type);
+      };
+      image.emit = (type) => {
+        listeners.get(type)?.();
+      };
+      return image;
+    };
+
+    const delayedImage = makeImage('delayed', {
+      complete: false,
+      naturalWidth: 0,
+      naturalHeight: 0,
+      clientWidth: 456,
+      clientHeight: 249
+    });
+    const readyImage = makeImage('ready');
+
+    const controller = createPageImageReplacementController({
+      logger: createSilentLogger(),
+      scheduleProcessingDrain(callback) {
+        scheduledDrains.push(callback);
+      },
+      setTimeoutImpl(callback, delay) {
+        timers.push({ callback, delay });
+        return timers.length;
+      },
+      clearTimeoutImpl() {},
+      processPageImageSourceImpl: async ({ imageElement }) => {
+        started.push(imageElement.dataset.testId);
+        return {
+          skipped: true,
+          reason: 'preview-fetch-unavailable',
+          candidateDiagnostics: [{ strategy: 'page-fetch', status: 'error' }],
+          candidateDiagnosticsSummary: 'page-fetch,error'
+        };
+      }
+    });
+
+    controller.processRoot({
+      querySelectorAll() {
+        return [delayedImage, readyImage];
+      }
+    });
+
+    assert.equal(scheduledDrains.length, 1);
+
+    scheduledDrains[0]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, []);
+    assert.equal(delayedImage.dataset.gwrPageImageState, undefined);
+    assert.equal(timers.length, 1);
+    assert.equal(scheduledDrains.length, 2);
+
+    scheduledDrains[1]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, ['ready']);
+    assert.equal(readyImage.dataset.gwrPageImageState, 'skipped');
+
+    delayedImage.complete = true;
+    delayedImage.naturalWidth = 1024;
+    delayedImage.naturalHeight = 559;
+    delayedImage.emit('load');
+    await Promise.resolve();
+
+    assert.equal(scheduledDrains.length, 3);
+
+    scheduledDrains[2]();
+    await Promise.resolve();
+
+    assert.deepEqual(started, ['ready', 'delayed']);
+    assert.equal(delayedImage.dataset.gwrPageImageState, 'skipped');
   });
 });
 

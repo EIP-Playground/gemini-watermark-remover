@@ -114,6 +114,54 @@ test('isProcessableGeminiImageElement should accept large Gemini images even out
   }), true);
 });
 
+test('isProcessableGeminiImageElement should accept opaque blob urls when they look like Gemini generated images', () => {
+  const actionCluster = {
+    querySelectorAll: () => [{}, {}, {}],
+    parentElement: null
+  };
+
+  assert.equal(isProcessableGeminiImageElement({
+    dataset: {},
+    naturalWidth: 1024,
+    naturalHeight: 768,
+    clientWidth: 480,
+    clientHeight: 360,
+    currentSrc: 'blob:https://gemini.google.com/runtime-preview',
+    src: 'blob:https://gemini.google.com/runtime-preview',
+    parentElement: actionCluster,
+    closest: () => null
+  }), true);
+});
+
+test('isProcessableGeminiImageElement should accept fullscreen cached blob images inside Gemini image containers', () => {
+  assert.equal(isProcessableGeminiImageElement({
+    dataset: {},
+    naturalWidth: 2048,
+    naturalHeight: 1118,
+    clientWidth: 951,
+    clientHeight: 519,
+    currentSrc: 'blob:https://gemini.google.com/fullscreen-cached',
+    src: 'blob:https://gemini.google.com/fullscreen-cached',
+    closest: (selector) => selector === 'generated-image,.generated-image-container' ? {} : null,
+    parentElement: null
+  }), true);
+});
+
+test('isProcessableGeminiImageElement should accept zero-sized fullscreen blob images inside Gemini containers before they finish rendering', () => {
+  assert.equal(isProcessableGeminiImageElement({
+    dataset: {},
+    naturalWidth: 0,
+    naturalHeight: 0,
+    clientWidth: 0,
+    clientHeight: 0,
+    complete: false,
+    currentSrc: '',
+    src: 'blob:https://gemini.google.com/fullscreen-pending',
+    closest: (selector) => selector === 'generated-image,.generated-image-container' ? {} : null,
+    parentElement: null
+  }), true);
+});
+
 test('isProcessableGeminiImageElement should reject non-Gemini urls and tiny images outside Gemini containers', () => {
   assert.equal(isProcessableGeminiImageElement({
     dataset: {},

@@ -41,10 +41,18 @@ export function resolveCandidateImageUrl(img) {
 export function isProcessableGeminiImageElement(img) {
   if (!img || typeof img.closest !== 'function') return false;
   if (img?.dataset?.gwrPreviewImage === 'true') return false;
+  const knownContainer = img.closest(GEMINI_IMAGE_CONTAINER_SELECTOR);
   const sourceUrl = resolveCandidateImageUrl(img);
   if (isGeminiGeneratedAssetUrl(sourceUrl)) {
-    if (img.closest(GEMINI_IMAGE_CONTAINER_SELECTOR)) return true;
+    if (knownContainer) return true;
     return hasMeaningfulGeminiImageSize(img);
+  }
+
+  if (
+    knownContainer &&
+    (sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:'))
+  ) {
+    return true;
   }
 
   return shouldUseRenderedImageFallback(img);
