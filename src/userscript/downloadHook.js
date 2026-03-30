@@ -221,6 +221,20 @@ export function isGeminiDownloadRpcUrl(url) {
   }
 }
 
+function isGeminiBatchExecuteUrl(url) {
+  if (typeof url !== 'string' || url.length === 0) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === GEMINI_DOWNLOAD_RPC_HOST
+      && parsed.pathname === GEMINI_DOWNLOAD_RPC_PATH;
+  } catch {
+    return false;
+  }
+}
+
 function decodeEscapedRpcUrl(rawUrl) {
   let decodedUrl = String(rawUrl || '').trim();
   if (!decodedUrl) {
@@ -377,7 +391,7 @@ export function createGeminiDownloadRpcFetchHook({
 
     const input = args[0];
     const rpcUrl = typeof input === 'string' ? input : input?.url;
-    if (!isGeminiDownloadRpcUrl(rpcUrl)) {
+    if (!isGeminiBatchExecuteUrl(rpcUrl)) {
       return originalFetch(...args);
     }
 

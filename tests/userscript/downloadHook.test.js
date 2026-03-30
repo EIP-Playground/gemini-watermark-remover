@@ -558,6 +558,42 @@ test('createGeminiDownloadRpcFetchHook should fallback to parsing asset ids from
   }]);
 });
 
+test('createGeminiDownloadRpcFetchHook should inspect non-c8o8Fe Gemini batchexecute responses when asset ids and original urls are present', async () => {
+  const seen = [];
+  const originalFetch = async () => new Response(
+    ')]}\'\n123\n[["wrb.fr","ESY5D","[null,\\\"https:\\\\/\\\\/lh3.googleusercontent.com\\\\/gg-dl\\\\/token=s1024-rj\\\"]",null,null,null,"generic"]]',
+    {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=UTF-8' }
+    }
+  );
+
+  const hook = createGeminiDownloadRpcFetchHook({
+    originalFetch,
+    getIntentMetadata: () => null,
+    onOriginalAssetDiscovered: (payload) => {
+      seen.push(payload);
+    }
+  });
+
+  await hook('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D&rt=c', {
+    method: 'POST',
+    body: 'f.req=%5Bnull%2C%22%5Bnull%2C%5B%5C%22image_generation_content%5C%22%2C0%2C%5C%22r_auto1234567890ab%5C%22%2C%5C%22rc_auto1234567890ab%5C%22%2C%5C%22c_auto1234567890ab%5C%22%5D%5D%22%5D&at=abc'
+  });
+
+  assert.deepEqual(seen, [{
+    rpcUrl: 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=ESY5D&rt=c',
+    discoveredUrl: 'https://lh3.googleusercontent.com/gg-dl/token=s0-rj',
+    intentMetadata: {
+      assetIds: {
+        responseId: 'r_auto1234567890ab',
+        draftId: 'rc_auto1234567890ab',
+        conversationId: 'c_auto1234567890ab'
+      }
+    }
+  }]);
+});
+
 test('createGeminiDownloadFetchHook should forward recent intent metadata and notify discovered original assets', async () => {
   let notified = null;
   let seenContext = null;
