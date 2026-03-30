@@ -5,6 +5,7 @@ import {
   createGeminiDownloadFetchHook,
   createGeminiDownloadRpcFetchHook,
   createGeminiDownloadIntentGate,
+  extractGeminiAssetIdsFromRpcRequestBody,
   extractGeminiOriginalAssetUrlsFromResponseText,
   isGeminiDownloadRpcUrl,
   isGeminiDownloadActionTarget
@@ -470,6 +471,16 @@ test('extractGeminiOriginalAssetUrlsFromResponseText should recover googleuserco
   ]);
 });
 
+test('extractGeminiAssetIdsFromRpcRequestBody should recover response draft and conversation ids from encoded batchexecute payload', () => {
+  const requestBody = 'f.req=%5Bnull%2C%22%5Bnull%2C%5B%5C%22image_generation_content%5C%22%2C0%2C%5C%22r_d7ef418292ede05c%5C%22%2C%5C%22rc_2315ec0b5621fce5%5C%22%2C%5C%22c_cdec91057e5fdcaf%5C%22%5D%5D%22%5D&at=abc';
+
+  assert.deepEqual(extractGeminiAssetIdsFromRpcRequestBody(requestBody), {
+    responseId: 'r_d7ef418292ede05c',
+    draftId: 'rc_2315ec0b5621fce5',
+    conversationId: 'c_cdec91057e5fdcaf'
+  });
+});
+
 test('createGeminiDownloadRpcFetchHook should notify discovered original asset urls from download rpc responses', async () => {
   const seen = [];
   const originalFetch = async () => new Response(
@@ -498,6 +509,42 @@ test('createGeminiDownloadRpcFetchHook should notify discovered original asset u
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), ')]}\'\n123\n[["wrb.fr","c8o8Fe","[null,\\\"https:\\\\/\\\\/lh3.googleusercontent.com\\\\/rd-gg-dl\\\\/token=s1024-rj\\\"]",null,null,null,"generic"]]');
+  assert.deepEqual(seen, [{
+    rpcUrl: 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=c8o8Fe&rt=c',
+    discoveredUrl: 'https://lh3.googleusercontent.com/rd-gg-dl/token=s0-rj',
+    intentMetadata: {
+      assetIds: {
+        responseId: 'r_d7ef418292ede05c',
+        draftId: 'rc_2315ec0b5621fce5',
+        conversationId: 'c_cdec91057e5fdcaf'
+      }
+    }
+  }]);
+});
+
+test('createGeminiDownloadRpcFetchHook should fallback to parsing asset ids from rpc request body when recent intent metadata is missing', async () => {
+  const seen = [];
+  const originalFetch = async () => new Response(
+    ')]}\'\n123\n[["wrb.fr","c8o8Fe","[null,\\\"https:\\\\/\\\\/lh3.googleusercontent.com\\\\/rd-gg-dl\\\\/token=s1024-rj\\\"]",null,null,null,"generic"]]',
+    {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=UTF-8' }
+    }
+  );
+
+  const hook = createGeminiDownloadRpcFetchHook({
+    originalFetch,
+    getIntentMetadata: () => null,
+    onOriginalAssetDiscovered: (payload) => {
+      seen.push(payload);
+    }
+  });
+
+  await hook('https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=c8o8Fe&rt=c', {
+    method: 'POST',
+    body: 'f.req=%5Bnull%2C%22%5Bnull%2C%5B%5C%22image_generation_content%5C%22%2C0%2C%5C%22r_d7ef418292ede05c%5C%22%2C%5C%22rc_2315ec0b5621fce5%5C%22%2C%5C%22c_cdec91057e5fdcaf%5C%22%5D%5D%22%5D&at=abc'
+  });
+
   assert.deepEqual(seen, [{
     rpcUrl: 'https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=c8o8Fe&rt=c',
     discoveredUrl: 'https://lh3.googleusercontent.com/rd-gg-dl/token=s0-rj',

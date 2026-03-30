@@ -102,6 +102,9 @@ const GEMINI_DOWNLOAD_RPC_HOST = 'gemini.google.com';
 const GEMINI_DOWNLOAD_RPC_PATH = '/_/BardChatUi/data/batchexecute';
 const GEMINI_DOWNLOAD_RPC_ID = 'c8o8Fe';
 const GEMINI_ORIGINAL_ASSET_URL_PATTERN = /https:(?:(?:\\\\\/)|(?:\\\/)|\/){2}[^\s"'\]]*googleusercontent\.com(?:(?:\\\\\/)|(?:\\\/)|\/)[^\s"'\]]+/gi;
+const GEMINI_RESPONSE_ID_PATTERN = /\br_[a-z0-9]+\b/i;
+const GEMINI_DRAFT_ID_PATTERN = /\brc_[a-z0-9]+\b/i;
+const GEMINI_CONVERSATION_ID_PATTERN = /\bc_[a-z0-9]+\b/i;
 
 function normalizeActionLabel(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -244,6 +247,101 @@ function decodeEscapedRpcUrl(rawUrl) {
     .trim();
 }
 
+function decodeRpcRequestBodyText(rawText) {
+  let decodedText = String(rawText || '').trim();
+  if (!decodedText) {
+    return '';
+  }
+
+  let previous = '';
+  let attempts = 0;
+  while (decodedText !== previous && attempts < 3) {
+    previous = decodedText;
+    attempts += 1;
+    try {
+      decodedText = decodeURIComponent(decodedText.replace(/\+/g, '%20'));
+    } catch {
+      break;
+    }
+  }
+
+  return decodedText;
+}
+
+function matchGeminiAssetIds(text) {
+  if (typeof text !== 'string' || text.length === 0) {
+    return null;
+  }
+
+  const responseId = text.match(GEMINI_RESPONSE_ID_PATTERN)?.[0] || null;
+  const draftId = text.match(GEMINI_DRAFT_ID_PATTERN)?.[0] || null;
+  const conversationId = text.match(GEMINI_CONVERSATION_ID_PATTERN)?.[0] || null;
+  if (!responseId && !draftId && !conversationId) {
+    return null;
+  }
+
+  return {
+    responseId,
+    draftId,
+    conversationId
+  };
+}
+
+export function extractGeminiAssetIdsFromRpcRequestBody(body) {
+  const candidateTexts = [];
+
+  if (typeof body === 'string') {
+    candidateTexts.push(body);
+    try {
+      const searchParams = new URLSearchParams(body);
+      const requestPayload = searchParams.get('f.req');
+      if (requestPayload) {
+        candidateTexts.push(requestPayload);
+      }
+    } catch {
+      // Ignore invalid search-params payloads and continue with the raw body.
+    }
+  } else if (body instanceof URLSearchParams) {
+    candidateTexts.push(body.toString());
+    const requestPayload = body.get('f.req');
+    if (requestPayload) {
+      candidateTexts.push(requestPayload);
+    }
+  } else {
+    return null;
+  }
+
+  for (const candidateText of candidateTexts) {
+    const assetIds = matchGeminiAssetIds(candidateText)
+      || matchGeminiAssetIds(decodeRpcRequestBodyText(candidateText));
+    if (assetIds) {
+      return assetIds;
+    }
+  }
+
+  return null;
+}
+
+async function extractGeminiAssetIdsFromRpcRequestArgs(args) {
+  const input = args[0];
+  const init = args[1];
+  const initBodyAssetIds = extractGeminiAssetIdsFromRpcRequestBody(init?.body);
+  if (initBodyAssetIds) {
+    return initBodyAssetIds;
+  }
+
+  if (typeof Request !== 'undefined' && input instanceof Request) {
+    try {
+      const requestText = await input.clone().text();
+      return extractGeminiAssetIdsFromRpcRequestBody(requestText);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 export function extractGeminiOriginalAssetUrlsFromResponseText(responseText) {
   if (typeof responseText !== 'string' || responseText.length === 0) {
     return [];
@@ -292,7 +390,14 @@ export function createGeminiDownloadRpcFetchHook({
       const intentMetadata = typeof getIntentMetadata === 'function'
         ? getIntentMetadata({ args, rpcUrl })
         : null;
-      if (!intentMetadata || typeof onOriginalAssetDiscovered !== 'function') {
+      const requestAssetIds = await extractGeminiAssetIdsFromRpcRequestArgs(args);
+      const resolvedIntentMetadata = intentMetadata?.assetIds || !requestAssetIds
+        ? intentMetadata
+        : {
+          ...(intentMetadata && typeof intentMetadata === 'object' ? intentMetadata : {}),
+          assetIds: requestAssetIds
+        };
+      if (!resolvedIntentMetadata || typeof onOriginalAssetDiscovered !== 'function') {
         return response;
       }
 
@@ -302,7 +407,7 @@ export function createGeminiDownloadRpcFetchHook({
         await onOriginalAssetDiscovered({
           rpcUrl,
           discoveredUrl,
-          intentMetadata
+          intentMetadata: resolvedIntentMetadata
         });
       }
     } catch (error) {
