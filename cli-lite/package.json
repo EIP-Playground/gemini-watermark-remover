@@ -1,0 +1,10 @@
+{
+  "name": "gemini-watermark-remover-lite",
+  "version": "1.0.0",
+  "description": "Lightweight CLI tool to remove Gemini watermarks",
+  "main": "remove-watermark.js",
+  "type": "module",
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}
